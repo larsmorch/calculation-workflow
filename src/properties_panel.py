@@ -75,6 +75,7 @@ class PropertiesPanel(QWidget):
             # Use appropriate widget based on parameter type
             if param.type is float:
                 widget = QDoubleSpinBox()
+                widget.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
                 widget.setRange(
                     param.min_value if param.min_value is not None else -1e9,
                     param.max_value if param.max_value is not None else 1e9
@@ -91,6 +92,7 @@ class PropertiesPanel(QWidget):
                 
             elif param.type is int:
                 widget = QSpinBox()
+                widget.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
                 widget.setRange(
                     int(param.min_value) if param.min_value is not None else -1000000000,
                     int(param.max_value) if param.max_value is not None else 1000000000

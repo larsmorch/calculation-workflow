@@ -228,6 +228,7 @@ class NodePort(QGraphicsEllipseItem):
             # Determine correct widget type
             if param.type is float:
                 widget = QDoubleSpinBox()
+                widget.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
                 widget.setRange(param.min_value if param.min_value is not None else -1e9, 
                                 param.max_value if param.max_value is not None else 1e9)
                 widget.setDecimals(param.decimals)
@@ -236,6 +237,7 @@ class NodePort(QGraphicsEllipseItem):
                 self.parent_node.module.set_input(self.name, widget.value())
             elif param.type is int:
                 widget = QSpinBox()
+                widget.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
                 widget.setRange(int(param.min_value) if param.min_value is not None else -1000000, 
                                 int(param.max_value) if param.max_value is not None else 1000000)
                 widget.setValue(int(param.default_value) if param.default_value is not None else 0)
