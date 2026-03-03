@@ -1,0 +1,346 @@
+from PyQt6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsPathItem, QGraphicsEllipseItem, QGraphicsTextItem, QGraphicsProxyWidget, QDoubleSpinBox, QSpinBox, QLineEdit
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QPen, QColor, QPainter, QPainterPath, QBrush
+
+from module_registry import registry
+
+
+class NodeCanvas(QGraphicsView):
+    """Canvas for displaying and connecting calculation nodes"""
+
+    node_selected = pyqtSignal(object)  # Emits selected node
+    connection_created = pyqtSignal(object, object)  # Emits (from_node, to_node)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+
+        # Setup view properties
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+
+        # Grid background
+        self.setBackgroundBrush(QColor(240, 240, 240))
+
+        self.nodes = []
+        self.connections = []
+        self.temp_connection = None
+
+    def add_node(self, type_id, position=None):
+        """Add a new calculation node to the canvas using a module type ID"""
+        if position is None:
+            position = QPointF(100, 100)
+            
+        try:
+            # Instantiate the actual calculation module class
+            module_instance = registry.create_instance(type_id)
+        except KeyError:
+            print(f"Error: Module type {type_id} not found in registry")
+            return None
+
+        node = CalculationNode(module_instance, position)
+        self.nodes.append(node)
+        self.scene.addItem(node)
+        return node
+
+    def remove_node(self, node):
+        """Remove a node and its connections"""
+        if node in self.nodes:
+            self.nodes.remove(node)
+            self.scene.removeItem(node)
+
+    def clear_canvas(self):
+        """Remove all nodes and connections"""
+        self.scene.clear()
+        self.nodes.clear()
+        self.connections.clear()
+        self.temp_connection = None
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        if event.button() == Qt.MouseButton.LeftButton:
+            if isinstance(item, NodePort):
+                # Start drawing a connection
+                self.temp_connection = NodeConnection(start_port=item)
+                self.scene.addItem(self.temp_connection)
+                self.temp_connection.update_path()
+                return # Don't pass to super to prevent dragging node
+        elif event.button() == Qt.MouseButton.RightButton:
+            if isinstance(item, NodeConnection):
+                self.remove_connection(item)
+                return
+                
+        super().mousePressEvent(event)
+        
+    def mouseMoveEvent(self, event):
+        if self.temp_connection:
+            # Update the end position of the temporary bezier curve
+            pos = self.mapToScene(event.pos())
+            self.temp_connection.current_end_pos = pos
+            self.temp_connection.update_path()
+        else:
+            super().mouseMoveEvent(event)
+            
+    def mouseReleaseEvent(self, event):
+        if self.temp_connection:
+            item = self.itemAt(event.pos())
+            if isinstance(item, NodePort) and self.is_valid_connection(self.temp_connection.start_port, item):
+                # Finalize connection
+                self.temp_connection.end_port = item
+                self.temp_connection.update_path()
+                
+                # Register connection on both ports
+                self.temp_connection.start_port.add_connection(self.temp_connection)
+                item.add_connection(self.temp_connection)
+                
+                self.connections.append(self.temp_connection)
+                self.connection_created.emit(self.temp_connection.start_port, item)
+            else:
+                # Cancel connection
+                self.scene.removeItem(self.temp_connection)
+                
+            self.temp_connection = None
+        else:
+            super().mouseReleaseEvent(event)
+            
+    def is_valid_connection(self, start_port, end_port):
+        """Check if ports can be connected"""
+        if start_port == end_port or start_port.parent_node == end_port.parent_node:
+            return False
+            
+        # Must connect output to input, or input to output
+        if start_port.is_input == end_port.is_input:
+            return False
+            
+        # Multiple incoming connections to the same input are allowed for summing
+        return True
+        
+    def remove_connection(self, connection):
+        if connection in self.connections:
+            connection.start_port.remove_connection(connection)
+            if connection.end_port:
+                connection.end_port.remove_connection(connection)
+            self.scene.removeItem(connection)
+            self.connections.remove(connection)
+
+
+class NodePort(QGraphicsEllipseItem):
+    """Visual representation of a connection port"""
+    
+    def __init__(self, parent_node, param, is_input, index, total_ports):
+        # Port geometry
+        self.radius = 6
+        super().__init__(-self.radius, -self.radius, self.radius*2, self.radius*2, parent=parent_node)
+        
+        self.parent_node = parent_node
+        self.param = param
+        self.name = param.name
+        self.is_input = is_input
+        self.connections = []
+        
+        # Calculate vertical position based on index to distribute evenly
+        y_step = parent_node.height / (total_ports + 1)
+        y_pos = y_step * (index + 1)
+        
+        self.input_widget = None
+        self.value_display = None
+        
+        if is_input:
+            self.setPos(0, y_pos)
+            self.setBrush(QBrush(QColor(100, 200, 100))) # Green for input
+            
+            # Label
+            label = QGraphicsTextItem(self.name, self)
+            label.setPos(self.radius + 2, -10)
+            
+            # Inline Input Widget
+            self.input_widget = QGraphicsProxyWidget(self)
+            
+            # Determine correct widget type
+            if param.type is float:
+                widget = QDoubleSpinBox()
+                widget.setRange(param.min_value if param.min_value is not None else -1e9, 
+                                param.max_value if param.max_value is not None else 1e9)
+                widget.setValue(float(param.default_value) if param.default_value is not None else 0.0)
+                widget.valueChanged.connect(lambda v: self.parent_node.module.set_input(self.name, v))
+                self.parent_node.module.set_input(self.name, widget.value())
+            elif param.type is int:
+                widget = QSpinBox()
+                widget.setRange(int(param.min_value) if param.min_value is not None else -1000000, 
+                                int(param.max_value) if param.max_value is not None else 1000000)
+                widget.setValue(int(param.default_value) if param.default_value is not None else 0)
+                widget.valueChanged.connect(lambda v: self.parent_node.module.set_input(self.name, v))
+                self.parent_node.module.set_input(self.name, widget.value())
+            else:
+                widget = QLineEdit()
+                widget.setText(str(param.default_value) if param.default_value is not None else "")
+                widget.textChanged.connect(lambda t: self.parent_node.module.set_input(self.name, t))
+                self.parent_node.module.set_input(self.name, widget.text())
+            
+            widget.setFixedWidth(50)
+            widget.setStyleSheet("font-size: 9px; padding: 0px;")
+            self.input_widget.setWidget(widget)
+            
+            # Position the inline input box next to label
+            self.input_widget.setPos(self.radius + 60, -10)
+            
+            # Value display for when widget is hidden (due to being wired)
+            self.value_display = QGraphicsTextItem("= --", self)
+            self.value_display.setDefaultTextColor(QColor(50, 50, 50))
+            self.value_display.setPos(self.radius + 60, -10)
+            self.value_display.hide()
+            
+        else:
+            self.setPos(parent_node.width, y_pos)
+            self.setBrush(QBrush(QColor(100, 100, 200))) # Blue for output
+            
+            # Label
+            label = QGraphicsTextItem(self.name, self)
+            label.setPos(-label.boundingRect().width() - self.radius - 2, -10)
+            
+            # Value display
+            self.value_display = QGraphicsTextItem("= --", self)
+            self.value_display.setDefaultTextColor(QColor(50, 50, 50))
+            self.value_display.setPos(-label.boundingRect().width() - self.radius - 40, -10)
+            
+        self.setPen(QPen(Qt.GlobalColor.black, 1))
+        # Important to catch mouse events for dragging
+        self.setAcceptHoverEvents(True)
+        
+    def add_connection(self, connection):
+        self.connections.append(connection)
+        if self.is_input:
+            if self.input_widget:
+                self.input_widget.hide() # Hide manual entry if wired
+            if self.value_display:
+                self.value_display.show()
+        
+    def remove_connection(self, connection):
+        if connection in self.connections:
+            self.connections.remove(connection)
+        if self.is_input and not self.connections:
+            if self.input_widget:
+                self.input_widget.show() # Show manual entry if un-wired
+            if self.value_display:
+                self.value_display.hide()
+
+    def get_global_pos(self):
+        """Return absolute position of port center in scene coordinates"""
+        return self.scenePos()
+
+
+class NodeConnection(QGraphicsPathItem):
+    """Bezier curve connecting two ports"""
+    
+    def __init__(self, start_port, end_port=None):
+        super().__init__()
+        self.start_port = start_port
+        self.end_port = end_port
+        
+        self.setPen(QPen(QColor(150, 150, 150), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        self.setZValue(-1) # Draw behind nodes
+        
+        self.current_end_pos = start_port.get_global_pos() if start_port else QPointF()
+        
+    def update_path(self):
+        """Redraws the bezier curve based on current port positions"""
+        if not self.start_port:
+            return
+            
+        start_pos = self.start_port.get_global_pos()
+        end_pos = self.end_port.get_global_pos() if self.end_port else self.current_end_pos
+        
+        # Calculate control points for smooth bezier (extend outward horizontally)
+        dist = abs(end_pos.x() - start_pos.x()) * 0.5
+        c1 = QPointF(start_pos.x() + dist, start_pos.y())
+        c2 = QPointF(end_pos.x() - dist, end_pos.y())
+        
+        path = QPainterPath(start_pos)
+        path.cubicTo(c1, c2, end_pos)
+        self.setPath(path)
+
+
+class CalculationNode(QGraphicsItem):
+    """Visual representation of a calculation module"""
+
+    def __init__(self, module_instance, position):
+        super().__init__()
+        # Store the actual computation instance
+        self.module = module_instance
+        self.setPos(position)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+
+        # Dynamic sizing based on ports
+        inputs = self.module.get_input_parameters()
+        outputs = self.module.get_output_parameters()
+        
+        self.width = max(150, 40 + max(len(inputs), len(outputs)) * 20)
+        self.height = max(80, 40 + max(len(inputs), len(outputs)) * 25)
+        
+        # Visual Ports dicts
+        self.input_ports = {}
+        self.output_ports = {}
+        
+        self._create_ports(inputs, outputs)
+        
+    def _create_ports(self, inputs, outputs):
+        # Create input ports
+        for i, param in enumerate(inputs):
+            port = NodePort(self, param, is_input=True, index=i, total_ports=len(inputs))
+            self.input_ports[param.name] = port
+            
+        # Create output ports
+        for i, param in enumerate(outputs):
+            port = NodePort(self, param, is_input=False, index=i, total_ports=len(outputs))
+            self.output_ports[param.name] = port
+            
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            # Update all connected paths when node moves
+            for port in list(self.input_ports.values()) + list(self.output_ports.values()):
+                for conn in port.connections:
+                    conn.update_path()
+        return super().itemChange(change, value)
+
+    def update_outputs_display(self, outputs_dict):
+        """Updates the visual strings next to output ports after calculation"""
+        for param_name, port in self.output_ports.items():
+            if param_name in outputs_dict and port.value_display:
+                val = outputs_dict[param_name]
+                if isinstance(val, float):
+                    port.value_display.setPlainText(f"= {val:.2f}")
+                else:
+                    port.value_display.setPlainText(f"= {val}")
+
+    def update_inputs_display(self):
+        """Updates the visual strings next to input ports after variable injection"""
+        for param_name, port in self.input_ports.items():
+            if port.value_display:
+                # Get exact injected value from inner application
+                val = self.module.inputs.get(param_name)
+                if isinstance(val, float):
+                    port.value_display.setPlainText(f"= {val:.2f}")
+                else:
+                    port.value_display.setPlainText(f"= {val}")
+
+    def boundingRect(self):
+        return QRectF(0, 0, self.width, self.height)
+
+    def paint(self, painter, option, widget):
+        from PyQt6.QtGui import QBrush
+
+        # Draw node box
+        if self.isSelected():
+            painter.setPen(QPen(QColor(0, 120, 215), 2))
+        else:
+            painter.setPen(QPen(Qt.GlobalColor.black, 1))
+
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        painter.drawRoundedRect(0, 0, self.width, self.height, 5, 5)
+
+        # Draw module name
+        painter.drawText(10, 25, self.module.name)
