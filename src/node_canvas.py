@@ -23,6 +23,7 @@ class NodeCanvas(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.scene.setSceneRect(-5000, -5000, 10000, 10000)
 
         # Grid background
         self.setBackgroundBrush(QColor(240, 240, 240))
