@@ -68,14 +68,28 @@ class NodeCanvas(QGraphicsView):
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            for item in self.scene.selectedItems():
+            items = list(self.scene.selectedItems())
+            for item in items:
                 if isinstance(item, CalculationNode):
                     self.remove_node(item)
                 elif isinstance(item, NodeConnection):
                     self.remove_connection(item)
         super().keyPressEvent(event)
+        
+    def wheelEvent(self, event):
+        if event.angleDelta().y() > 0:
+            scale_factor = 1.15
+        else:
+            scale_factor = 1.0 / 1.15
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.scale(scale_factor, scale_factor)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.last_pan_pos = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+
         item = self.itemAt(event.pos())
         if event.button() == Qt.MouseButton.LeftButton:
             if isinstance(item, NodePort):
@@ -84,6 +98,8 @@ class NodeCanvas(QGraphicsView):
                 self.scene.addItem(self.temp_connection)
                 self.temp_connection.update_path()
                 return # Don't pass to super to prevent dragging node
+            elif isinstance(item, CalculationNode):
+                self.node_selected.emit(item)
         elif event.button() == Qt.MouseButton.RightButton:
             if isinstance(item, NodeConnection):
                 self.remove_connection(item)
@@ -92,6 +108,14 @@ class NodeCanvas(QGraphicsView):
         super().mousePressEvent(event)
         
     def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.MiddleButton:
+            if hasattr(self, 'last_pan_pos'):
+                delta = event.pos() - self.last_pan_pos
+                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+                self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+                self.last_pan_pos = event.pos()
+            return
+
         if self.temp_connection:
             # Update the end position of the temporary bezier curve
             pos = self.mapToScene(event.pos())
@@ -101,6 +125,12 @@ class NodeCanvas(QGraphicsView):
             super().mouseMoveEvent(event)
             
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if hasattr(self, 'last_pan_pos'):
+                del self.last_pan_pos
+            return
+
         if self.temp_connection:
             item = self.itemAt(event.pos())
             if isinstance(item, NodePort) and self.is_valid_connection(self.temp_connection.start_port, item):
@@ -357,6 +387,9 @@ class CalculationNode(QGraphicsItem):
             for port in list(self.input_ports.values()) + list(self.output_ports.values()):
                 for conn in port.connections:
                     conn.update_path()
+        elif change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            if value and self.scene() and self.scene().views():
+                self.scene().views()[0].node_selected.emit(self)
         return super().itemChange(change, value)
 
     def update_outputs_display(self, outputs_dict):

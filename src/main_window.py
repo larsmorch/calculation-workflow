@@ -25,6 +25,7 @@ class MainWindow(QMainWindow):
 
         # Initialize workflow engine
         self.workflow_engine = WorkflowEngine()
+        self.current_workflow_file = None
 
         # Setup UI components
         self.setup_ui()
@@ -215,43 +216,127 @@ class MainWindow(QMainWindow):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.node_canvas.clear_canvas()
-            self.workflow_engine = WorkflowEngine()
+            self.workflow_engine.nodes.clear()
+            self.workflow_engine.connections.clear()
+            self.current_workflow_file = None
             self.statusBar().showMessage("New workflow created")
 
     def open_workflow(self):
         """Open an existing workflow"""
-        filename, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open Workflow",
-            "",
-            "Workflow Files (*.wf);;All Files (*)"
-        )
-
-        if filename:
-            # TODO: Implement workflow loading
-            self.statusBar().showMessage(f"Opening {filename}")
+        filename, _ = QFileDialog.getOpenFileName(self, "Open Workflow", "", "Workflow Files (*.wf);;All Files (*)")
+        if not filename: return
+        
+        import json
+        from PyQt6.QtCore import QPointF
+        
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+                
+            self.node_canvas.clear_canvas()
+            self.workflow_engine.nodes.clear()
+            self.workflow_engine.connections.clear()
+            
+            created_nodes = {}
+            for i, n_data in enumerate(data.get("nodes", [])):
+                node = self.node_canvas.add_node(n_data["type_id"], QPointF(n_data["x"], n_data["y"]))
+                if not node: continue
+                node.module.name = n_data["name"]
+                
+                for k, v in n_data.get("inputs", {}).items():
+                    node.module.set_input(k, v)
+                    if k in node.input_ports:
+                        widget = node.input_ports[k].input_widget.widget()
+                        from PyQt6.QtWidgets import QDoubleSpinBox, QSpinBox, QLineEdit
+                        widget.blockSignals(True)
+                        if isinstance(widget, QDoubleSpinBox):
+                            widget.setValue(float(v) if v is not None else 0.0)
+                        elif isinstance(widget, QSpinBox):
+                            widget.setValue(int(v) if v is not None else 0)
+                        elif isinstance(widget, QLineEdit):
+                            widget.setText(str(v) if v is not None else "")
+                        widget.blockSignals(False)
+                        
+                from node_graphics import get_dynamic_node_width
+                node.width = get_dynamic_node_width(node.module.name)
+                for port in node.output_ports.values():
+                    port.setPos(node.width, port.pos().y())
+                node.update()
+                
+                self.workflow_engine.add_node(node)
+                created_nodes[i] = node
+                
+            for c_data in data.get("connections", []):
+                start_node = created_nodes.get(c_data["start_node"])
+                end_node = created_nodes.get(c_data["end_node"])
+                if start_node and end_node:
+                    start_port = start_node.output_ports.get(c_data["start_port"])
+                    end_port = end_node.input_ports.get(c_data["end_port"])
+                    if start_port and end_port:
+                        from node_canvas import NodeConnection
+                        conn = NodeConnection(start_port, end_port)
+                        conn.update_path()
+                        start_port.add_connection(conn)
+                        end_port.add_connection(conn)
+                        self.node_canvas.scene.addItem(conn)
+                        self.node_canvas.connections.append(conn)
+                        self.workflow_engine.add_connection(conn)
+            
+            self.current_workflow_file = filename
+            self.statusBar().showMessage(f"Opened {filename}")
+            self.run_workflow()
+        except Exception as e:
+            QMessageBox.critical(self, "Error Loading", f"Failed to open workflow: {e}")
 
     def save_workflow(self):
         """Save current workflow"""
-        # TODO: Implement workflow saving
-        self.statusBar().showMessage("Workflow saved")
+        if self.current_workflow_file:
+            self._save_to_file(self.current_workflow_file)
+        else:
+            self.save_workflow_as()
 
     def save_workflow_as(self):
         """Save workflow with new name"""
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Workflow As",
-            "",
-            "Workflow Files (*.wf);;All Files (*)"
-        )
-
+        filename, _ = QFileDialog.getSaveFileName(self, "Save Workflow As", "", "Workflow Files (*.wf);;All Files (*)")
         if filename:
-            # TODO: Implement workflow saving
-            self.statusBar().showMessage(f"Saved as {filename}")
+            if not filename.endswith('.wf'): filename += '.wf'
+            self.current_workflow_file = filename
+            self._save_to_file(filename)
+
+    def _save_to_file(self, filename):
+        import json
+        data = {"nodes": [], "connections": []}
+        
+        for i, node in enumerate(self.workflow_engine.nodes):
+            node.save_id = i
+            data["nodes"].append({
+                "type_id": node.module.get_module_type_id(),
+                "name": node.module.name,
+                "x": node.scenePos().x(),
+                "y": node.scenePos().y(),
+                "inputs": node.module.inputs
+            })
+            
+        for conn in self.workflow_engine.connections:
+            data["connections"].append({
+                "start_node": getattr(conn.start_port.parent_node, 'save_id', -1),
+                "start_port": conn.start_port.name,
+                "end_node": getattr(conn.end_port.parent_node, 'save_id', -1),
+                "end_port": conn.end_port.name
+            })
+            
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=4)
+        self.statusBar().showMessage(f"Workflow saved to {filename}")
 
     def delete_selected(self):
         """Delete selected nodes"""
-        # TODO: Implement node deletion
+        from node_canvas import CalculationNode, NodeConnection
+        for item in list(self.node_canvas.scene.selectedItems()):
+            if isinstance(item, CalculationNode):
+                self.node_canvas.remove_node(item)
+            elif isinstance(item, NodeConnection):
+                self.node_canvas.remove_connection(item)
         self.statusBar().showMessage("Deleted selected items")
 
     def run_workflow(self):
