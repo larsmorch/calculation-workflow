@@ -9,6 +9,11 @@ from module_base import ModuleBase
 if TYPE_CHECKING:
     from workflow_engine import ModuleInstance
 
+def get_dynamic_node_width(name_text: str) -> int:
+    """Calculate dynamic node width based on text length with a minimum of 300."""
+    # Approx 8 pixels per character plus padding
+    text_width = len(name_text) * 8 + 40
+    return int(max(300, text_width))
 
 class PortGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of an input or output port"""
@@ -46,8 +51,8 @@ class NodeGraphicsItem(QGraphicsItem):
     def __init__(self, instance: 'ModuleInstance'):
         super().__init__()
         self.instance = instance
-        self.width = 200
-        self.height = 100
+        self.width = get_dynamic_node_width(self.instance.instance_name)
+        self.height = 200
         self.title_height = 30
 
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
