@@ -15,6 +15,13 @@ def get_dynamic_node_width(name_text: str) -> int:
     text_width = len(name_text) * 8 + 40
     return int(max(300, text_width))
 
+def get_dynamic_node_height(num_inputs: int, num_outputs: int) -> int:
+    """Calculate dynamic node height based on the number of ports."""
+    max_ports = max(num_inputs, num_outputs)
+    # 50px for title and padding, 25px per port. Minimum height is 100px.
+    calculated_height = 50 + (max_ports * 25)
+    return int(max(100, calculated_height))
+
 class PortGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of an input or output port"""
 
@@ -70,9 +77,7 @@ class NodeGraphicsItem(QGraphicsItem):
 
     def _adjust_height(self):
         """Adjust node height based on number of ports"""
-        max_ports = max(len(self.input_ports), len(self.output_ports))
-        min_height = self.title_height + max_ports * 25 + 20
-        self.height = max(self.height, min_height)
+        self.height = get_dynamic_node_height(len(self.input_ports), len(self.output_ports))
 
     def _create_ports(self):
         """Create input and output port graphics"""

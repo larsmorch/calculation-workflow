@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
 from PyQt6.QtGui import QPen, QColor, QPainter, QPainterPath, QBrush
 
 from module_registry import registry
-from node_graphics import get_dynamic_node_width
+from node_graphics import get_dynamic_node_width, get_dynamic_node_height
 
 class NodeCanvas(QGraphicsView):
     """Canvas for displaying and connecting calculation nodes"""
@@ -279,7 +279,7 @@ class CalculationNode(QGraphicsItem):
         outputs = self.module.get_output_parameters()
         
         self.width = get_dynamic_node_width(self.module.name)
-        self.height = max(80, 40 + max(len(inputs), len(outputs)) * 25)
+        self.height = get_dynamic_node_height(len(inputs), len(outputs))
         
         # Visual Ports dicts
         self.input_ports = {}
