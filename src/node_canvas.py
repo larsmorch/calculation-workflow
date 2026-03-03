@@ -155,6 +155,10 @@ class NodePort(QGraphicsEllipseItem):
             label = QGraphicsTextItem(self.name, self)
             label.setPos(self.radius + 2, -10)
             
+            # Calculate dynamic offset based on label length constraints
+            label_width = label.boundingRect().width()
+            widget_offset = self.radius + 4 + label_width
+            
             # Inline Input Widget
             self.input_widget = QGraphicsProxyWidget(self)
             
@@ -183,13 +187,13 @@ class NodePort(QGraphicsEllipseItem):
             widget.setStyleSheet("font-size: 9px; padding: 0px;")
             self.input_widget.setWidget(widget)
             
-            # Position the inline input box next to label
-            self.input_widget.setPos(self.radius + 60, -10)
+            # Position the inline input box next to label dynamically
+            self.input_widget.setPos(widget_offset, -10)
             
             # Value display for when widget is hidden (due to being wired)
             self.value_display = QGraphicsTextItem("= --", self)
             self.value_display.setDefaultTextColor(QColor(50, 50, 50))
-            self.value_display.setPos(self.radius + 60, -10)
+            self.value_display.setPos(widget_offset, -10)
             self.value_display.hide()
             
         else:
@@ -198,12 +202,13 @@ class NodePort(QGraphicsEllipseItem):
             
             # Label
             label = QGraphicsTextItem(self.name, self)
-            label.setPos(-label.boundingRect().width() - self.radius - 2, -10)
+            label_width = label.boundingRect().width()
+            label.setPos(-label_width - self.radius - 2, -10)
             
-            # Value display
+            # Value display (will be placed to the left of the label based on final length)
             self.value_display = QGraphicsTextItem("= --", self)
             self.value_display.setDefaultTextColor(QColor(50, 50, 50))
-            self.value_display.setPos(-label.boundingRect().width() - self.radius - 40, -10)
+            self.value_display.setPos(-label_width - self.radius - 40, -10)
             
         self.setPen(QPen(Qt.GlobalColor.black, 1))
         # Important to catch mouse events for dragging
@@ -315,6 +320,11 @@ class CalculationNode(QGraphicsItem):
                     port.value_display.setPlainText(f"= {val:.2f}")
                 else:
                     port.value_display.setPlainText(f"= {val}")
+                
+                # Re-align dynamically so text pushes left perfectly from label
+                label_width = QGraphicsTextItem(port.name).boundingRect().width()
+                val_width = port.value_display.boundingRect().width()
+                port.value_display.setPos(-label_width - port.radius - 4 - val_width, -10)
 
     def update_inputs_display(self):
         """Updates the visual strings next to input ports after variable injection"""

@@ -19,8 +19,8 @@ def get_dynamic_node_height(num_inputs: int, num_outputs: int) -> int:
     """Calculate dynamic node height based on the number of ports."""
     max_ports = max(num_inputs, num_outputs)
     # 50px for title and padding, 25px per port. Minimum height is 100px.
-    calculated_height = 50 + (max_ports * 25)
-    return int(max(100, calculated_height))
+    calculated_height = 100 + (max_ports * 25)
+    return int(max(150, calculated_height))
 
 class PortGraphicsItem(QGraphicsEllipseItem):
     """Visual representation of an input or output port"""
