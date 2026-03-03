@@ -148,7 +148,9 @@ class NodePort(QGraphicsEllipseItem):
         self.input_widget = None
         self.value_display = None
         
-        if is_input:
+        # UI init pushed here from construct to allow format_value binding
+        
+        if self.is_input:
             self.setPos(0, y_pos)
             self.setBrush(QBrush(QColor(100, 200, 100))) # Green for input
             
@@ -192,7 +194,7 @@ class NodePort(QGraphicsEllipseItem):
             self.input_widget.setPos(widget_offset, -10)
             
             # Value display for when widget is hidden (due to being wired)
-            self.value_display = QGraphicsTextItem("= --", self)
+            self.value_display = QGraphicsTextItem(self.format_value("--"), self)
             self.value_display.setDefaultTextColor(QColor(50, 50, 50))
             self.value_display.setPos(widget_offset, -10)
             self.value_display.hide()
@@ -207,13 +209,22 @@ class NodePort(QGraphicsEllipseItem):
             label.setPos(-label_width - self.radius - 2, -10)
             
             # Value display (will be placed to the left of the label based on final length)
-            self.value_display = QGraphicsTextItem("= --", self)
+            self.value_display = QGraphicsTextItem(self.format_value("--"), self)
             self.value_display.setDefaultTextColor(QColor(50, 50, 50))
             self.value_display.setPos(-label_width - self.radius - 40, -10)
             
         self.setPen(QPen(Qt.GlobalColor.black, 1))
         # Important to catch mouse events for dragging
         self.setAcceptHoverEvents(True)
+        
+    def format_value(self, val):
+        """Standardizes graphical string representations of parameter values, appending its custom unit string if it exists."""
+        unit_str = f" {self.param.units}" if hasattr(self.param, 'units') and self.param.units else ""
+        if val is None or val == "--":
+            return f"= --{unit_str}"
+        if isinstance(val, (int, float)):
+            return f"= {val:.2f}{unit_str}"
+        return f"= {val}{unit_str}"
         
     def add_connection(self, connection):
         self.connections.append(connection)
@@ -324,10 +335,7 @@ class CalculationNode(QGraphicsItem):
         for param_name, port in self.output_ports.items():
             if param_name in outputs_dict and port.value_display:
                 val = outputs_dict[param_name]
-                if isinstance(val, float):
-                    port.value_display.setPlainText(f"= {val:.2f}")
-                else:
-                    port.value_display.setPlainText(f"= {val}")
+                port.value_display.setPlainText(port.format_value(val))
                 
                 # Re-align dynamically so text pushes left perfectly from label
                 label_width = QGraphicsTextItem(port.name).boundingRect().width()
@@ -344,10 +352,7 @@ class CalculationNode(QGraphicsItem):
             if port.value_display:
                 # Get exact injected value from inner application
                 val = self.module.inputs.get(param_name)
-                if isinstance(val, float):
-                    port.value_display.setPlainText(f"= {val:.2f}")
-                else:
-                    port.value_display.setPlainText(f"= {val}")
+                port.value_display.setPlainText(port.format_value(val))
 
     def boundingRect(self):
         return QRectF(0, 0, self.width, self.height)
