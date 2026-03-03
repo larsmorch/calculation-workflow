@@ -325,6 +325,9 @@ class CalculationNode(QGraphicsItem):
                 label_width = QGraphicsTextItem(port.name).boundingRect().width()
                 val_width = port.value_display.boundingRect().width()
                 port.value_display.setPos(-label_width - port.radius - 4 - val_width, -10)
+        
+        # Flush Qt redraw cache natively out to GUI
+        self.update()
 
     def update_inputs_display(self):
         """Updates the visual strings next to input ports after variable injection"""
@@ -354,3 +357,30 @@ class CalculationNode(QGraphicsItem):
 
         # Draw module name
         painter.drawText(10, 25, self.module.name)
+        
+    def mouseDoubleClickEvent(self, event):
+        """Allow user to rename the module by double clicking the node background"""
+        from PyQt6.QtWidgets import QInputDialog, QLineEdit
+        from node_graphics import get_dynamic_node_width
+        
+        new_name, ok = QInputDialog.getText(None, "Rename Node", "New Node Name:", QLineEdit.EchoMode.Normal, self.module.name)
+        if ok and new_name.strip():
+            self.prepareGeometryChange()
+            self.module.name = new_name.strip()
+            
+            # Recalculate node width
+            self.width = get_dynamic_node_width(self.module.name)
+            
+            # Shift all output ports to match new width border
+            for port in self.output_ports.values():
+                port.setPos(self.width, port.pos().y())
+                
+            # Trigger connection line updates
+            for port in list(self.input_ports.values()) + list(self.output_ports.values()):
+                for conn in port.connections:
+                    conn.update_path()
+                    
+            # Refresh visuals
+            self.update()
+            
+        super().mouseDoubleClickEvent(event)
