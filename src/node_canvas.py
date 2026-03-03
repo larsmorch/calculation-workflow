@@ -230,6 +230,7 @@ class NodePort(QGraphicsEllipseItem):
                 widget = QDoubleSpinBox()
                 widget.setRange(param.min_value if param.min_value is not None else -1e9, 
                                 param.max_value if param.max_value is not None else 1e9)
+                widget.setDecimals(param.decimals)
                 widget.setValue(float(param.default_value) if param.default_value is not None else 0.0)
                 widget.valueChanged.connect(self._on_input_changed)
                 self.parent_node.module.set_input(self.name, widget.value())
@@ -283,7 +284,8 @@ class NodePort(QGraphicsEllipseItem):
         if val is None or val == "--":
             return f"= --{unit_str}"
         if isinstance(val, (int, float)):
-            return f"= {val:.2f}{unit_str}"
+            decimals = getattr(self.param, 'decimals', 1)
+            return f"= {val:.{decimals}f}{unit_str}"
         return f"= {val}{unit_str}"
         
     def add_connection(self, connection):

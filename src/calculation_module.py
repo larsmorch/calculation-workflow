@@ -17,6 +17,7 @@ class InputParameter:
     max_value: Optional[float] = None
     required: bool = True
     description: str = ""
+    decimals: int = 1
     
     def validate(self, value: Any) -> Tuple[bool, str]:
         """Validates a given value against the parameter's constraints."""
@@ -48,6 +49,7 @@ class OutputParameter:
     type: Type
     units: str = ""
     description: str = ""
+    decimals: int = 1
 
 
 class CalculationModule(ABC):
@@ -61,10 +63,12 @@ class CalculationModule(ABC):
     category: str = "General"
     description: str = "Base calculation module."
     version: str = "1.0.0"
+    latex_formula: str = ""
 
     def __init__(self):
         self.inputs: Dict[str, Any] = {}
         self.outputs: Dict[str, Any] = {}
+        self.figure = None
         self._initialize_defaults()
 
     def _initialize_defaults(self):
