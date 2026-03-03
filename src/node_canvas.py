@@ -10,6 +10,7 @@ class NodeCanvas(QGraphicsView):
 
     node_selected = pyqtSignal(object)  # Emits selected node
     connection_created = pyqtSignal(object, object)  # Emits (from_node, to_node)
+    calculation_requested = pyqtSignal()  # Live auto calc trigger
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -168,19 +169,19 @@ class NodePort(QGraphicsEllipseItem):
                 widget.setRange(param.min_value if param.min_value is not None else -1e9, 
                                 param.max_value if param.max_value is not None else 1e9)
                 widget.setValue(float(param.default_value) if param.default_value is not None else 0.0)
-                widget.valueChanged.connect(lambda v: self.parent_node.module.set_input(self.name, v))
+                widget.valueChanged.connect(self._on_input_changed)
                 self.parent_node.module.set_input(self.name, widget.value())
             elif param.type is int:
                 widget = QSpinBox()
                 widget.setRange(int(param.min_value) if param.min_value is not None else -1000000, 
                                 int(param.max_value) if param.max_value is not None else 1000000)
                 widget.setValue(int(param.default_value) if param.default_value is not None else 0)
-                widget.valueChanged.connect(lambda v: self.parent_node.module.set_input(self.name, v))
+                widget.valueChanged.connect(self._on_input_changed)
                 self.parent_node.module.set_input(self.name, widget.value())
             else:
                 widget = QLineEdit()
                 widget.setText(str(param.default_value) if param.default_value is not None else "")
-                widget.textChanged.connect(lambda t: self.parent_node.module.set_input(self.name, t))
+                widget.textChanged.connect(self._on_input_changed)
                 self.parent_node.module.set_input(self.name, widget.text())
             
             widget.setFixedWidth(50)
@@ -221,6 +222,13 @@ class NodePort(QGraphicsEllipseItem):
                 self.input_widget.hide() # Hide manual entry if wired
             if self.value_display:
                 self.value_display.show()
+                
+    def _on_input_changed(self, value):
+        """Helper to inject new typed values down into logic engine and fire live redraw queue!"""
+        self.parent_node.module.set_input(self.name, value)
+        if self.scene() and self.scene().views():
+            # Force auto run workflow by emitting to canvas!
+            self.scene().views()[0].calculation_requested.emit()
         
     def remove_connection(self, connection):
         if connection in self.connections:
@@ -325,6 +333,7 @@ class CalculationNode(QGraphicsItem):
                 label_width = QGraphicsTextItem(port.name).boundingRect().width()
                 val_width = port.value_display.boundingRect().width()
                 port.value_display.setPos(-label_width - port.radius - 4 - val_width, -10)
+                port.value_display.show() # Failsafe force explicit visualization
         
         # Flush Qt redraw cache natively out to GUI
         self.update()
