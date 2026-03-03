@@ -175,6 +175,8 @@ class MainWindow(QMainWindow):
         # Node canvas signals
         self.node_canvas.node_selected.connect(self.on_node_selected)
         self.node_canvas.connection_created.connect(self.on_connection_created)
+        self.node_canvas.node_deleted.connect(self.workflow_engine.remove_node)
+        self.node_canvas.connection_deleted.connect(self.workflow_engine.remove_connection)
         self.node_canvas.calculation_requested.connect(self.run_workflow) # LIVE UPDATES!
         self.workflow_engine.calculation_complete.connect(self.on_calculation_complete)
 

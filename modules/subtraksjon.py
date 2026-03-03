@@ -10,14 +10,14 @@ class Subtraksjon(CalculationModule):
     @classmethod
     def get_input_parameters(cls) -> List[InputParameter]:
         return [
-            InputParameter("val1", "Value 1", float, default_value=0.0),
-            InputParameter("val2", "Value 2", float, default_value=0.0)
+            InputParameter("val1", "Value 1", float, units="kN", default_value=0.0),
+            InputParameter("val2", "Value 2", float, units="kN", default_value=0.0)
         ]
 
     @classmethod
     def get_output_parameters(cls) -> List[OutputParameter]:
         return [
-            OutputParameter("sum", "Sum", float)
+            OutputParameter("sum", "Sum", float, units="kN")
         ]
 
     def calculate(self) -> Dict[str, Any]:

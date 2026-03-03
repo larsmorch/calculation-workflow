@@ -10,6 +10,8 @@ class NodeCanvas(QGraphicsView):
 
     node_selected = pyqtSignal(object)  # Emits selected node
     connection_created = pyqtSignal(object, object)  # Emits (from_node, to_node)
+    node_deleted = pyqtSignal(object) # Flow deletion sync
+    connection_deleted = pyqtSignal(object) 
     calculation_requested = pyqtSignal()  # Live auto calc trigger
 
     def __init__(self, parent=None):
@@ -49,8 +51,13 @@ class NodeCanvas(QGraphicsView):
     def remove_node(self, node):
         """Remove a node and its connections"""
         if node in self.nodes:
+            for port in list(node.input_ports.values()) + list(node.output_ports.values()):
+                for conn in list(port.connections):
+                    self.remove_connection(conn)
             self.nodes.remove(node)
             self.scene.removeItem(node)
+            self.node_deleted.emit(node)
+            self.calculation_requested.emit()
 
     def clear_canvas(self):
         """Remove all nodes and connections"""
@@ -58,6 +65,15 @@ class NodeCanvas(QGraphicsView):
         self.nodes.clear()
         self.connections.clear()
         self.temp_connection = None
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            for item in self.scene.selectedItems():
+                if isinstance(item, CalculationNode):
+                    self.remove_node(item)
+                elif isinstance(item, NodeConnection):
+                    self.remove_connection(item)
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         item = self.itemAt(event.pos())
@@ -125,6 +141,8 @@ class NodeCanvas(QGraphicsView):
                 connection.end_port.remove_connection(connection)
             self.scene.removeItem(connection)
             self.connections.remove(connection)
+            self.connection_deleted.emit(connection)
+            self.calculation_requested.emit()
 
 
 class NodePort(QGraphicsEllipseItem):
@@ -155,7 +173,10 @@ class NodePort(QGraphicsEllipseItem):
             self.setBrush(QBrush(QColor(100, 200, 100))) # Green for input
             
             # Label
-            label = QGraphicsTextItem(self.name, self)
+            label_text = self.name
+            if hasattr(self.param, 'units') and self.param.units:
+                label_text += f" [{self.param.units}]"
+            label = QGraphicsTextItem(label_text, self)
             label.setPos(self.radius + 2, -10)
             
             # Calculate dynamic offset based on label length constraints
@@ -265,8 +286,16 @@ class NodeConnection(QGraphicsPathItem):
         
         self.setPen(QPen(QColor(150, 150, 150), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         self.setZValue(-1) # Draw behind nodes
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         
         self.current_end_pos = start_port.get_global_pos() if start_port else QPointF()
+
+    def paint(self, painter, option, widget=None):
+        if self.isSelected():
+            self.setPen(QPen(QColor(255, 0, 0), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        else:
+            self.setPen(QPen(QColor(150, 150, 150), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        super().paint(painter, option, widget)
         
     def update_path(self):
         """Redraws the bezier curve based on current port positions"""
