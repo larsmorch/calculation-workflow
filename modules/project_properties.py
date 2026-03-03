@@ -10,13 +10,15 @@ class ProjectProperties(CalculationModule):
     @classmethod
     def get_input_parameters(cls) -> List[InputParameter]:
         return [
-            InputParameter("prop_value", "Placeholder Property", float, default_value=0.0)
+            InputParameter("hrv", "HRV", float, units="kote", default_value=0.0),
+            InputParameter("luketerskel", "LUKETERSKEL", float, units="kote", default_value=0.0)
         ]
 
     @classmethod
     def get_output_parameters(cls) -> List[OutputParameter]:
         return [
-            OutputParameter("prop_value_out", "Placeholder Property Out", float)
+            OutputParameter("hrv_out", "HRV Out", float, units="kote"),
+            OutputParameter("luketerskel_out", "LUKETERSKEL Out", float, units="kote")
         ]
 
     def calculate(self) -> Dict[str, Any]:

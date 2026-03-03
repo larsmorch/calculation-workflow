@@ -1,0 +1,32 @@
+{
+    "nodes": [
+        {
+            "type_id": "AdditionModule",
+            "name": "Addition",
+            "x": -128.0,
+            "y": -91.0,
+            "inputs": {
+                "val1": 10.0,
+                "val2": 20.0
+            }
+        },
+        {
+            "type_id": "Subtraksjon",
+            "name": "Subtraksjon",
+            "x": 279.0,
+            "y": 70.0,
+            "inputs": {
+                "val1": 30.0,
+                "val2": 10.0
+            }
+        }
+    ],
+    "connections": [
+        {
+            "start_node": 0,
+            "start_port": "sum",
+            "end_node": 1,
+            "end_port": "val1"
+        }
+    ]
+}
