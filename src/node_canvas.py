@@ -153,6 +153,14 @@ class NodeCanvas(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
             
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.resetTransform()
+            if self.nodes:
+                self.centerOn(self.nodes[0])
+            return
+        super().mouseDoubleClickEvent(event)
+            
     def is_valid_connection(self, start_port, end_port):
         """Check if ports can be connected"""
         if start_port == end_port or start_port.parent_node == end_port.parent_node:
