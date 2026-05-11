@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Calculation Workflow - SwecoGPT Edition")
+        self.setWindowTitle("Calculation Workflow")
         self.setGeometry(100, 100, 1400, 900)
 
         # Initialize workflow engine
