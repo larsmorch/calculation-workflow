@@ -35,6 +35,87 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         self.connect_signals()
+        
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if any(url.isLocalFile() and url.toLocalFile().endswith('.xlsx') for url in urls):
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        for url in urls:
+            if url.isLocalFile() and url.toLocalFile().endswith('.xlsx'):
+                file_path = url.toLocalFile()
+                
+                # Map drop position to scene coordinates
+                drop_pos = event.position().toPoint()
+                view_pos = self.node_canvas.mapFrom(self, drop_pos)
+                scene_pos = self.node_canvas.mapToScene(view_pos)
+                
+                self._create_excel_node(file_path, scene_pos)
+                event.acceptProposedAction()
+                break
+
+    def _create_excel_node(self, file_path, position):
+        import os
+        from extract_variables import extract_variables
+        from calculation_module import CalculationModule, InputParameter, OutputParameter
+        from module_registry import registry
+        
+        inputs, outputs = extract_variables(file_path)
+        if not inputs and not outputs:
+            QMessageBox.warning(self, "Excel Import", "No inputs or outputs found in the Excel file.")
+            return
+
+        filename = os.path.basename(file_path)
+        module_name = os.path.splitext(filename)[0]
+        class_name = "".join(c for c in module_name.title() if c.isalnum()) + "ExcelModule"
+        
+        input_params = []
+        for item in inputs:
+            py_type = float if isinstance(item['value'], (int, float)) else str
+            input_params.append(
+                InputParameter(name=item['name'], display_name=item['name'], type=py_type, units=item['unit'] or "", default_value=item['value'])
+            )
+            
+        output_params = []
+        for item in outputs:
+            py_type = float if isinstance(item['value'], (int, float)) else str
+            output_params.append(
+                OutputParameter(name=item['name'], display_name=item['name'], type=py_type, units=item['unit'] or "")
+            )
+            
+        def get_input_parameters(cls):
+            return input_params
+
+        def get_output_parameters(cls):
+            return output_params
+
+        def calculate(self):
+            return {}
+
+        dynamic_class = type(str(class_name), (CalculationModule,), {
+            "name": module_name,
+            "category": "Excel",
+            "description": f"Generated from {filename}",
+            "version": "1.0.0",
+            "get_input_parameters": classmethod(get_input_parameters),
+            "get_output_parameters": classmethod(get_output_parameters),
+            "calculate": calculate
+        })
+        
+        registry.register(dynamic_class)
+        
+        node = self.node_canvas.add_node(class_name, position)
+        if node:
+            self.workflow_engine.add_node(node)
+            self.statusBar().showMessage(f"Added Excel module {module_name} to canvas")
 
     def setup_ui(self):
         """Setup the main UI layout"""
