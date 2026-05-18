@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         for item in outputs:
             py_type = float if isinstance(item['value'], (int, float)) else str
             output_params.append(
-                OutputParameter(name=item['name'], display_name=item['name'], type=py_type, units=item['unit'] or "")
+                OutputParameter(name=item['name'], display_name=item['name'], type=py_type, units=item['unit'] or "", initial_value=item['value'])
             )
             
         def get_input_parameters(cls):
@@ -98,7 +98,58 @@ class MainWindow(QMainWindow):
             return output_params
 
         def calculate(self):
-            return {}
+            import xlwings as xw
+            import pythoncom
+            
+            pythoncom.CoInitialize()
+            try:
+                # Start app in background
+                app = xw.App(visible=False)
+                # Open workbook
+                wb = app.books.open(file_path)
+                
+                # Write inputs
+                for param_name, val in self.inputs.items():
+                    if val is not None:
+                        try:
+                            wb.names[param_name].refers_to_range.value = val
+                        except Exception:
+                            try:
+                                sheet_name, cell = param_name.split('!')
+                                wb.sheets[sheet_name].range(cell).value = val
+                            except Exception as e2:
+                                print(f"Error writing input {param_name}: {e2}")
+                                
+                # Calculate
+                app.calculate()
+                
+                # Read outputs
+                results = {}
+                for param in self.get_output_parameters():
+                    try:
+                        val = wb.names[param.name].refers_to_range.value
+                        results[param.name] = val
+                    except Exception:
+                        try:
+                            sheet_name, cell = param.name.split('!')
+                            val = wb.sheets[sheet_name].range(cell).value
+                            results[param.name] = val
+                        except Exception as e2:
+                            print(f"Error reading output {param.name}: {e2}")
+                            results[param.name] = None
+                            
+                # Save and clean up
+                wb.save()
+                wb.close()
+                app.quit()
+                
+                return results
+                
+            except Exception as e:
+                print(f"Excel Execution Error: {e}")
+                return {"Error": str(e)}
+            finally:
+                pythoncom.CoUninitialize()
 
         dynamic_class = type(str(class_name), (CalculationModule,), {
             "name": module_name,
@@ -339,7 +390,7 @@ class MainWindow(QMainWindow):
                         widget.blockSignals(False)
                         
                 from node_graphics import get_dynamic_node_width
-                node.width = get_dynamic_node_width(node.module.name)
+                node.width = get_dynamic_node_width(node.module.name, node.module.get_input_parameters(), node.module.get_output_parameters())
                 for port in node.output_ports.values():
                     port.setPos(node.width, port.pos().y())
                 node.update()

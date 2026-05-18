@@ -269,12 +269,20 @@ class NodePort(QGraphicsEllipseItem):
             # Label
             label = QGraphicsTextItem(self.name, self)
             label_width = label.boundingRect().width()
-            label.setPos(-label_width - self.radius - 2, -10)
+            label.setPos(-label_width - self.radius - 2, -15)
             
-            # Value display (will be placed to the left of the label based on final length)
-            self.value_display = QGraphicsTextItem(self.format_value("--"), self)
+            # Value display
+            initial_val = getattr(self.param, 'initial_value', None)
+            if initial_val is not None:
+                val_text = self.format_value(initial_val)
+            else:
+                val_text = self.format_value("--")
+            
+            self.value_display = QGraphicsTextItem(val_text, self)
             self.value_display.setDefaultTextColor(QColor(50, 50, 50))
-            self.value_display.setPos(-label_width - self.radius - 40, -10)
+            
+            val_width = self.value_display.boundingRect().width()
+            self.value_display.setPos(-val_width - self.radius - 2, 2)
             
         self.setPen(QPen(Qt.GlobalColor.black, 1))
         # Important to catch mouse events for dragging
@@ -413,9 +421,8 @@ class CalculationNode(QGraphicsItem):
                 port.value_display.setPlainText(port.format_value(val))
                 
                 # Re-align dynamically so text pushes left perfectly from label
-                label_width = QGraphicsTextItem(port.name).boundingRect().width()
                 val_width = port.value_display.boundingRect().width()
-                port.value_display.setPos(-label_width - port.radius - 4 - val_width, -10)
+                port.value_display.setPos(-val_width - port.radius - 2, 2)
                 port.value_display.show() # Failsafe force explicit visualization
         
         # Flush Qt redraw cache natively out to GUI
@@ -458,7 +465,7 @@ class CalculationNode(QGraphicsItem):
             self.module.name = new_name.strip()
             
             # Recalculate node width
-            self.width = get_dynamic_node_width(self.module.name)
+            self.width = get_dynamic_node_width(self.module.name, self.module.get_input_parameters(), self.module.get_output_parameters())
             
             # Shift all output ports to match new width border
             for port in self.output_ports.values():

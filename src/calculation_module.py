@@ -50,6 +50,7 @@ class OutputParameter:
     units: str = ""
     description: str = ""
     decimals: int = 1
+    initial_value: Any = None
 
 
 class CalculationModule(ABC):

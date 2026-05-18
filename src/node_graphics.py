@@ -9,17 +9,30 @@ from module_base import ModuleBase
 if TYPE_CHECKING:
     from workflow_engine import ModuleInstance
 
-def get_dynamic_node_width(name_text: str) -> int:
+def get_dynamic_node_width(name_text: str, inputs=None, outputs=None) -> int:
     """Calculate dynamic node width based on text length with a minimum of 300."""
     # Approx 8 pixels per character plus padding
-    text_width = len(name_text) * 8 + 40
-    return int(max(300, text_width))
+    title_width = len(name_text) * 8 + 40
+    
+    max_in_len = 0
+    if inputs:
+        # Name + unit + some buffer for the input widget/value
+        max_in_len = max([len(f"{p.name} [{getattr(p, 'units', '')}]") + 15 for p in inputs] + [0])
+        
+    max_out_len = 0
+    if outputs:
+        # Output values take some space, pad by ~15 chars
+        max_out_len = max([len(p.name) + 15 for p in outputs] + [0])
+        
+    ports_width = (max_in_len + max_out_len) * 8 + 60
+    
+    return int(max(300, title_width, ports_width))
 
 def get_dynamic_node_height(num_inputs: int, num_outputs: int) -> int:
     """Calculate dynamic node height based on the number of ports."""
     max_ports = max(num_inputs, num_outputs)
-    # 50px for title and padding, 25px per port. Minimum height is 100px.
-    calculated_height = 100 + (max_ports * 25)
+    # 50px for title and padding, 45px per port to fit two lines. Minimum height is 150px.
+    calculated_height = 100 + (max_ports * 45)
     return int(max(150, calculated_height))
 
 class PortGraphicsItem(QGraphicsEllipseItem):
