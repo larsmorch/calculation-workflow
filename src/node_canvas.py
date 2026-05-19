@@ -35,7 +35,14 @@ class NodeCanvas(QGraphicsView):
     def add_node(self, type_id, position=None):
         """Add a new calculation node to the canvas using a module type ID"""
         if position is None:
-            position = QPointF(100, 100)
+            # Logical placement: Find the rightmost edge of existing nodes
+            if self.nodes:
+                max_x = max(node.scenePos().x() + node.width for node in self.nodes)
+                # Find the y of the last added node or use average
+                last_node = self.nodes[-1]
+                position = QPointF(max_x + 80, last_node.scenePos().y())
+            else:
+                position = QPointF(100, 100)
             
         try:
             # Instantiate the actual calculation module class
@@ -47,6 +54,14 @@ class NodeCanvas(QGraphicsView):
         node = CalculationNode(module_instance, position)
         self.nodes.append(node)
         self.scene.addItem(node)
+        
+        # Focus and make sure it's visible/selected
+        self.scene.clearSelection()
+        node.setSelected(True)
+        self.ensureVisible(node)
+        self.centerOn(node)
+        self.node_selected.emit(node)
+        
         return node
 
     def remove_node(self, node):

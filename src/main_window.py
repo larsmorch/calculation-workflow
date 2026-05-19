@@ -23,6 +23,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Calculation Workflow")
         self.setGeometry(100, 100, 1400, 900)
 
+        # Initialize persistent Excel app manager
+        self.excel_app = None
+
         # Initialize workflow engine
         self.workflow_engine = WorkflowEngine()
         self.current_workflow_file = None
@@ -38,6 +41,23 @@ class MainWindow(QMainWindow):
         
         # Enable drag and drop
         self.setAcceptDrops(True)
+
+    def closeEvent(self, event):
+        """Handle application close to clean up background processes"""
+        if self.excel_app:
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+                self.excel_app.quit()
+                self.excel_app = None
+            except Exception as e:
+                print(f"Error closing Excel app: {e}")
+            finally:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+        super().closeEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -55,6 +75,7 @@ class MainWindow(QMainWindow):
                 
                 # Map drop position to scene coordinates
                 drop_pos = event.position().toPoint()
+                # Important: map from the widget that received the event
                 view_pos = self.node_canvas.mapFrom(self, drop_pos)
                 scene_pos = self.node_canvas.mapToScene(view_pos)
                 
@@ -62,21 +83,33 @@ class MainWindow(QMainWindow):
                 event.acceptProposedAction()
                 break
 
-    def _create_excel_node(self, file_path, position):
+    def _get_excel_app(self):
+        """Get or create the persistent Excel application"""
+        if self.excel_app is None:
+            import xlwings as xw
+            import pythoncom
+            pythoncom.CoInitialize()
+            self.excel_app = xw.App(visible=False)
+            self.excel_app.display_alerts = False
+        return self.excel_app
+
+    def _get_or_create_excel_class(self, file_path):
         import os
         from extract_variables import extract_variables
         from calculation_module import CalculationModule, InputParameter, OutputParameter
         from module_registry import registry
         
-        inputs, outputs = extract_variables(file_path)
-        if not inputs and not outputs:
-            QMessageBox.warning(self, "Excel Import", "No inputs or outputs found in the Excel file.")
-            return
-
         filename = os.path.basename(file_path)
         module_name = os.path.splitext(filename)[0]
         class_name = "".join(c for c in module_name.title() if c.isalnum()) + "ExcelModule"
         
+        if registry.has_type(class_name):
+            return class_name
+            
+        inputs, outputs = extract_variables(file_path)
+        if not inputs and not outputs:
+            return None
+
         input_params = []
         for item in inputs:
             py_type = float if isinstance(item['value'], (int, float)) else str
@@ -97,16 +130,22 @@ class MainWindow(QMainWindow):
         def get_output_parameters(cls):
             return output_params
 
+        # Store main window reference locally for dynamic class
+        main_window_ref = self
+
         def calculate(self):
-            import xlwings as xw
             import pythoncom
             
             pythoncom.CoInitialize()
             try:
-                # Start app in background
-                app = xw.App(visible=False)
-                # Open workbook
-                wb = app.books.open(file_path)
+                # Use persistent app and cache workbook
+                app = main_window_ref._get_excel_app()
+                
+                if not hasattr(self, '_wb'):
+                    # Open workbook if not already open for this node
+                    self._wb = app.books.open(file_path)
+                
+                wb = self._wb
                 
                 # Write inputs
                 for param_name, val in self.inputs.items():
@@ -138,18 +177,16 @@ class MainWindow(QMainWindow):
                             print(f"Error reading output {param.name}: {e2}")
                             results[param.name] = None
                             
-                # Save and clean up
-                wb.save()
-                wb.close()
-                app.quit()
-                
                 return results
                 
             except Exception as e:
                 print(f"Excel Execution Error: {e}")
                 return {"Error": str(e)}
             finally:
-                pythoncom.CoUninitialize()
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
 
         dynamic_class = type(str(class_name), (CalculationModule,), {
             "name": module_name,
@@ -158,15 +195,28 @@ class MainWindow(QMainWindow):
             "version": "1.0.0",
             "get_input_parameters": classmethod(get_input_parameters),
             "get_output_parameters": classmethod(get_output_parameters),
-            "calculate": calculate
+            "calculate": calculate,
+            "excel_path": file_path
         })
         
         registry.register(dynamic_class)
+        return class_name
+
+    def _create_excel_node(self, file_path, position):
+        import os
+        from module_registry import registry
         
+        class_name = self._get_or_create_excel_class(file_path)
+        if not class_name:
+            QMessageBox.warning(self, "Excel Import", f"No inputs or outputs found in {os.path.basename(file_path)}.")
+            return
+
         node = self.node_canvas.add_node(class_name, position)
         if node:
+            # Ensure excel_path is set on the instance as well
+            node.module.excel_path = file_path
             self.workflow_engine.add_node(node)
-            self.statusBar().showMessage(f"Added Excel module {module_name} to canvas")
+            self.statusBar().showMessage(f"Added Excel module {os.path.basename(file_path)} to canvas")
 
     def setup_ui(self):
         """Setup the main UI layout"""
@@ -371,8 +421,19 @@ class MainWindow(QMainWindow):
             
             created_nodes = {}
             for i, n_data in enumerate(data.get("nodes", [])):
-                node = self.node_canvas.add_node(n_data["type_id"], QPointF(n_data["x"], n_data["y"]))
+                type_id = n_data["type_id"]
+                excel_path = n_data.get("excel_path")
+                
+                if excel_path:
+                    # Recreate dynamic excel module class if needed
+                    self._get_or_create_excel_class(excel_path)
+                
+                node = self.node_canvas.add_node(type_id, QPointF(n_data["x"], n_data["y"]))
                 if not node: continue
+                
+                if excel_path:
+                    node.module.excel_path = excel_path
+                    
                 node.module.name = n_data["name"]
                 
                 for k, v in n_data.get("inputs", {}).items():
@@ -418,6 +479,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Opened {filename}")
             self.run_workflow()
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             QMessageBox.critical(self, "Error Loading", f"Failed to open workflow: {e}")
 
     def save_workflow(self):
@@ -441,13 +504,17 @@ class MainWindow(QMainWindow):
         
         for i, node in enumerate(self.workflow_engine.nodes):
             node.save_id = i
-            data["nodes"].append({
+            node_data = {
                 "type_id": node.module.get_module_type_id(),
                 "name": node.module.name,
                 "x": node.scenePos().x(),
                 "y": node.scenePos().y(),
                 "inputs": node.module.inputs
-            })
+            }
+            if hasattr(node.module, 'excel_path') and node.module.excel_path:
+                node_data["excel_path"] = node.module.excel_path
+                
+            data["nodes"].append(node_data)
             
         for conn in self.workflow_engine.connections:
             data["connections"].append({

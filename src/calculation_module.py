@@ -65,6 +65,9 @@ class CalculationModule(ABC):
     description: str = "Base calculation module."
     version: str = "1.0.0"
     latex_formula: str = ""
+    
+    # Path to source excel file if this is a dynamic excel module
+    excel_path: Optional[str] = None
 
     def __init__(self):
         self.inputs: Dict[str, Any] = {}

@@ -41,6 +41,10 @@ class ModuleRegistry:
             raise KeyError(f"Module '{type_id}' is not registered.")
         return self._registry[type_id]
 
+    def has_type(self, type_id: str) -> bool:
+        """Checks if a module type ID is registered."""
+        return type_id in self._registry
+
     def create_instance(self, type_id: str) -> CalculationModule:
         """Instantiates and returns a module by its type ID."""
         module_class = self.get_by_type_id(type_id)
