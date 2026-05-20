@@ -2,7 +2,7 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMenuBar, QMenu, QToolBar, QStatusBar, QSplitter, QMessageBox,
-    QFileDialog, QDockWidget
+    QFileDialog, QDockWidget, QInputDialog
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         # Initialize workflow engine
         self.workflow_engine = WorkflowEngine()
         self.current_workflow_file = None
+        self.project_number = None
 
         # Setup UI components
         self.setup_ui()
@@ -59,30 +60,6 @@ class MainWindow(QMainWindow):
                     pass
         super().closeEvent(event)
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if any(url.isLocalFile() and url.toLocalFile().endswith('.xlsx') for url in urls):
-                event.acceptProposedAction()
-                return
-        event.ignore()
-
-    def dropEvent(self, event):
-        urls = event.mimeData().urls()
-        for url in urls:
-            if url.isLocalFile() and url.toLocalFile().endswith('.xlsx'):
-                file_path = url.toLocalFile()
-                
-                # Map drop position to scene coordinates
-                drop_pos = event.position().toPoint()
-                # Important: map from the widget that received the event
-                view_pos = self.node_canvas.mapFrom(self, drop_pos)
-                scene_pos = self.node_canvas.mapToScene(view_pos)
-                
-                self._create_excel_node(file_path, scene_pos)
-                event.acceptProposedAction()
-                break
-
     def _get_excel_app(self):
         """Get or create the persistent Excel application"""
         if self.excel_app is None:
@@ -95,13 +72,22 @@ class MainWindow(QMainWindow):
 
     def _get_or_create_excel_class(self, file_path):
         import os
+        import re
         from extract_variables import extract_variables
         from calculation_module import CalculationModule, InputParameter, OutputParameter
         from module_registry import registry
         
         filename = os.path.basename(file_path)
         module_name = os.path.splitext(filename)[0]
-        class_name = "".join(c for c in module_name.title() if c.isalnum()) + "ExcelModule"
+        
+        # Robust class name generation supporting Norwegian characters (Unicode is valid in Python 3 identifiers)
+        # We title() the name, then filter for alphanumeric characters only.
+        # Python 3 supports ÆØÅ in identifiers, but for maximum compatibility with dynamic type creation,
+        # we'll keep them but ensure it's a valid identifier.
+        clean_name = "".join(c for c in module_name.title() if c.isalnum() or c == '_')
+        if not clean_name or clean_name[0].isdigit():
+            clean_name = "Excel_" + clean_name
+        class_name = clean_name + "ExcelModule"
         
         if registry.has_type(class_name):
             return class_name
@@ -147,9 +133,10 @@ class MainWindow(QMainWindow):
                 
                 wb = self._wb
                 
-                # Write inputs
+                # Write inputs ONLY if they are connected
+                connected_inputs = getattr(self, 'connected_inputs', [])
                 for param_name, val in self.inputs.items():
-                    if val is not None:
+                    if param_name in connected_inputs and val is not None:
                         try:
                             wb.names[param_name].refers_to_range.value = val
                         except Exception:
@@ -162,6 +149,20 @@ class MainWindow(QMainWindow):
                 # Calculate
                 app.calculate()
                 
+                # Sync back unconnected inputs from Excel
+                for param in self.get_input_parameters():
+                    if param.name not in connected_inputs:
+                        try:
+                            val = wb.names[param.name].refers_to_range.value
+                            self.inputs[param.name] = val
+                        except Exception:
+                            try:
+                                sheet_name, cell = param.name.split('!')
+                                val = wb.sheets[sheet_name].range(cell).value
+                                self.inputs[param.name] = val
+                            except Exception:
+                                pass
+
                 # Read outputs
                 results = {}
                 for param in self.get_output_parameters():
@@ -254,6 +255,12 @@ class MainWindow(QMainWindow):
         # File Menu
         file_menu = menubar.addMenu("&File")
 
+        new_project_action = QAction("&New Project...", self)
+        new_project_action.triggered.connect(self.create_new_project)
+        file_menu.addAction(new_project_action)
+
+        file_menu.addSeparator()
+
         new_action = QAction("&New Workflow", self)
         new_action.setShortcut(QKeySequence.StandardKey.New)
         new_action.triggered.connect(self.new_workflow)
@@ -324,6 +331,13 @@ class MainWindow(QMainWindow):
         toolbar.setIconSize(QSize(24, 24))
         self.addToolBar(toolbar)
 
+        # New Project
+        new_project_action = QAction("New Project", self)
+        new_project_action.triggered.connect(self.create_new_project)
+        toolbar.addAction(new_project_action)
+
+        toolbar.addSeparator()
+
         # New
         new_action = QAction("New", self)
         new_action.triggered.connect(self.new_workflow)
@@ -361,6 +375,7 @@ class MainWindow(QMainWindow):
         self.node_canvas.node_deleted.connect(self.workflow_engine.remove_node)
         self.node_canvas.connection_deleted.connect(self.workflow_engine.remove_connection)
         self.node_canvas.calculation_requested.connect(self.run_workflow) # LIVE UPDATES!
+        self.node_canvas.file_dropped.connect(self._create_excel_node)
         self.workflow_engine.calculation_complete.connect(self.on_calculation_complete)
 
     # Slot methods
@@ -406,8 +421,10 @@ class MainWindow(QMainWindow):
     def open_workflow(self):
         """Open an existing workflow"""
         filename, _ = QFileDialog.getOpenFileName(self, "Open Workflow", "", "Workflow Files (*.wf);;All Files (*)")
-        if not filename: return
-        
+        if filename:
+            self._load_from_file(filename)
+
+    def _load_from_file(self, filename):
         import json
         from PyQt6.QtCore import QPointF
         
@@ -419,6 +436,10 @@ class MainWindow(QMainWindow):
             self.workflow_engine.nodes.clear()
             self.workflow_engine.connections.clear()
             
+            # Load project number
+            self.project_number = data.get("project_number")
+            self._update_window_title()
+
             created_nodes = {}
             for i, n_data in enumerate(data.get("nodes", [])):
                 type_id = n_data["type_id"]
@@ -483,6 +504,12 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Error Loading", f"Failed to open workflow: {e}")
 
+    def _update_window_title(self):
+        title = "Calculation Workflow"
+        if self.project_number:
+            title += f" - Project: {self.project_number}"
+        self.setWindowTitle(title)
+
     def save_workflow(self):
         """Save current workflow"""
         if self.current_workflow_file:
@@ -500,7 +527,7 @@ class MainWindow(QMainWindow):
 
     def _save_to_file(self, filename):
         import json
-        data = {"nodes": [], "connections": []}
+        data = {"project_number": self.project_number, "nodes": [], "connections": []}
         
         for i, node in enumerate(self.workflow_engine.nodes):
             node.save_id = i
@@ -524,8 +551,8 @@ class MainWindow(QMainWindow):
                 "end_port": conn.end_port.name
             })
             
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=4)
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
         self.statusBar().showMessage(f"Workflow saved to {filename}")
 
     def delete_selected(self):
@@ -557,6 +584,140 @@ class MainWindow(QMainWindow):
             "A modular calculation framework for engineering workflows.\n\n"
             "Built with PyQt6"
         )
+
+    def create_new_project(self):
+        """Create a new project by duplicating Excel files and saving a new workflow"""
+        import os
+        import shutil
+        import json
+
+        # Check if we have Excel nodes
+        excel_nodes = [node for node in self.workflow_engine.nodes if hasattr(node.module, 'excel_path') and node.module.excel_path]
+        if not excel_nodes:
+            QMessageBox.warning(self, "New Project", "No Excel-based modules found in the current workflow.")
+            return
+
+        # Prompt for project number
+        project_number, ok = QInputDialog.getText(self, "New Project", "Enter Project Number:")
+        if not ok or not project_number:
+            return
+
+        # Prompt for target directory
+        target_dir = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+        if not target_dir:
+            return
+
+        try:
+            # 0. Close all managed workbooks to release file locks
+            if self.excel_app:
+                try:
+                    import pythoncom
+                    pythoncom.CoInitialize()
+                    for book in list(self.excel_app.books):
+                        try:
+                            book.close()
+                        except Exception:
+                            pass
+                    # Also clear the cached references on the modules
+                    for node in excel_nodes:
+                        if hasattr(node.module, '_wb'):
+                            delattr(node.module, '_wb')
+                except Exception as e_excel:
+                    print(f"Warning: Could not close all workbooks: {e_excel}")
+                finally:
+                    try:
+                        pythoncom.CoUninitialize()
+                    except Exception:
+                        pass
+
+            # 1. Map unique Excel files to their new paths
+            unique_files = {}
+            for node in excel_nodes:
+                src_path = node.module.excel_path
+                if src_path not in unique_files:
+                    filename = os.path.basename(src_path)
+                    new_filename = f"{project_number}_{filename}"
+                    dest_path = os.path.join(target_dir, new_filename)
+                    unique_files[src_path] = dest_path
+
+            # 2. Copy files
+            for src, dest in unique_files.items():
+                try:
+                    shutil.copy2(src, dest)
+                except PermissionError:
+                    QMessageBox.critical(
+                        self, 
+                        "Permission Error", 
+                        f"Could not copy '{os.path.basename(src)}'.\n\n"
+                        "Please ensure the file is not open in Excel or another application and try again."
+                    )
+                    return
+
+            # 3. Create JSON payload for the new workflow
+            data = {"project_number": project_number, "nodes": [], "connections": []}
+            
+            for i, node in enumerate(self.workflow_engine.nodes):
+                node.save_id = i
+                
+                # Default type_id
+                type_id = node.module.get_module_type_id()
+                
+                # If it's an Excel node, the type_id will change because the filename changed
+                excel_path = getattr(node.module, 'excel_path', None)
+                new_excel_path = None
+                
+                if excel_path:
+                    new_excel_path = unique_files.get(excel_path)
+                    if new_excel_path:
+                        # Calculate the new class name/type_id exactly as _get_or_create_excel_class does
+                        new_filename = os.path.basename(new_excel_path)
+                        new_module_name = os.path.splitext(new_filename)[0]
+                        clean_name = "".join(c for c in new_module_name.title() if c.isalnum() or c == '_')
+                        if not clean_name or clean_name[0].isdigit():
+                            clean_name = "Excel_" + clean_name
+                        type_id = clean_name + "ExcelModule"
+
+                node_data = {
+                    "type_id": type_id,
+                    "name": node.module.name,
+                    "x": node.scenePos().x(),
+                    "y": node.scenePos().y(),
+                    "inputs": node.module.inputs
+                }
+                if new_excel_path:
+                    node_data["excel_path"] = new_excel_path
+                    
+                data["nodes"].append(node_data)
+                
+            for conn in self.workflow_engine.connections:
+                data["connections"].append({
+                    "start_node": getattr(conn.start_port.parent_node, 'save_id', -1),
+                    "start_port": conn.start_port.name,
+                    "end_node": getattr(conn.end_port.parent_node, 'save_id', -1),
+                    "end_port": conn.end_port.name
+                })
+
+            # 4. Save the new workflow file
+            wf_filename = f"{project_number}_calculation workflow.wf"
+            wf_path = os.path.join(target_dir, wf_filename)
+            with open(wf_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+
+            # 5. Prompt to load
+            reply = QMessageBox.question(
+                self,
+                "New Project Created",
+                f"Project {project_number} created successfully.\nLoad the new workflow now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self._load_from_file(wf_path)
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Error", f"Failed to create new project: {e}")
 
 
 if __name__ == '__main__':

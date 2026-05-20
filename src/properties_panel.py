@@ -75,6 +75,7 @@ class PropertiesPanel(QWidget):
             # Use appropriate widget based on parameter type
             if param.type is float:
                 widget = QDoubleSpinBox()
+                widget.setReadOnly(True)
                 widget.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
                 widget.setRange(
                     param.min_value if param.min_value is not None else -1e9,
@@ -92,6 +93,7 @@ class PropertiesPanel(QWidget):
                 
             elif param.type is int:
                 widget = QSpinBox()
+                widget.setReadOnly(True)
                 widget.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
                 widget.setRange(
                     int(param.min_value) if param.min_value is not None else -1000000000,
@@ -109,6 +111,7 @@ class PropertiesPanel(QWidget):
             else:
                 # Fallback string input
                 widget = QLineEdit()
+                widget.setReadOnly(True)
                 current = module.inputs.get(param.name)
                 if current is not None:
                     widget.setText(str(current))

@@ -92,6 +92,9 @@ class WorkflowEngine(QObject):
                         print(f"Failed to sum combined inputs for {input_name}: {e}")
                         node.module.set_input(input_name, values[0])
 
+            # Inject list of actively connected input names into the module
+            node.module.connected_inputs = list(injections.keys())
+
             # Natively instruct visual nodes to update their front-end labels
             if hasattr(node, 'update_inputs_display'):
                 node.update_inputs_display()

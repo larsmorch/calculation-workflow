@@ -13,6 +13,7 @@ class NodeCanvas(QGraphicsView):
     node_deleted = pyqtSignal(object) # Flow deletion sync
     connection_deleted = pyqtSignal(object) 
     calculation_requested = pyqtSignal()  # Live auto calc trigger
+    file_dropped = pyqtSignal(str, QPointF) # Emits (file_path, scene_pos)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,6 +32,37 @@ class NodeCanvas(QGraphicsView):
         self.nodes = []
         self.connections = []
         self.temp_connection = None
+        
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if any(url.isLocalFile() and url.toLocalFile().lower().endswith(('.xlsx', '.xlsm')) for url in urls):
+                event.acceptProposedAction()
+                return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if any(url.isLocalFile() and url.toLocalFile().lower().endswith(('.xlsx', '.xlsm')) for url in urls):
+                event.acceptProposedAction()
+                return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        for url in urls:
+            file_path = url.toLocalFile()
+            if file_path.lower().endswith(('.xlsx', '.xlsm')):
+                scene_pos = self.mapToScene(event.position().toPoint())
+                self.file_dropped.emit(file_path, scene_pos)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
 
     def add_node(self, type_id, position=None):
         """Add a new calculation node to the canvas using a module type ID"""
